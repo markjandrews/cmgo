@@ -56,7 +56,7 @@ function (add_go_executable _TARGET_NAME)
         ERROR_VARIABLE err
         ERROR_STRIP_TRAILING_WHITESPACE
         RESULT_VARIABLE res
-        COMMAND_ECHO STDERR
+        # COMMAND_ECHO STDERR
     )
 
     if (res)
@@ -65,7 +65,7 @@ function (add_go_executable _TARGET_NAME)
 
     set(_GO_PACKAGE_DEPS_FILES "")
     foreach(item IN LISTS _GO_PACKAGE_DEPS)
-        execute_process(COMMAND ${Golang_GO_EXECUTABLE} list -f "{{.Dir}}" ${item}
+        execute_process(COMMAND ${Golang_GO_EXECUTABLE} list -f "dir:{{.Dir}};std:{{.Standard}};" ${item}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
             OUTPUT_VARIABLE _item_package_dir
             OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -74,7 +74,18 @@ function (add_go_executable _TARGET_NAME)
             RESULT_VARIABLE res
         )
 
-        execute_process(COMMAND ${Golang_GO_EXECUTABLE} list -f "{{ join .GoFiles \";\" }}" ${item}
+        # set (_golang_dep_package_dir_regex [[(go([0-9]+)(\.([0-9]+)(\.([0-9]+))?)?.*)]])
+        set (_golang_dep_package_dir_regex [[dir:(.+);std:(.+);.*]])
+        if (_item_package_dir MATCHES "${_golang_dep_package_dir_regex}")
+            set (_item_package_dir_dir "${CMAKE_MATCH_1}")
+            set (_item_package_dir_std "${CMAKE_MATCH_2}")
+        endif()
+
+        if (_item_package_dir_std STREQUAL "true")
+            continue()
+        endif()
+
+        execute_process(COMMAND ${Golang_GO_EXECUTABLE} list -f "{{ join .GoFiles \" \" }}" ${item}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
             OUTPUT_VARIABLE _item_package_files
             OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -84,15 +95,27 @@ function (add_go_executable _TARGET_NAME)
         )
 
         foreach(file_item IN LISTS _item_package_files)
-            list(APPEND _GO_PACKAGE_DEPS_FILES "${_item_package_dir}/${file_item}")
+            list(APPEND _GO_PACKAGE_DEPS_FILES "${_item_package_dir_dir}/${file_item}")
         endforeach()
     endforeach()
 
     set(CMAKE_GO_OBJ_OUTPUT_PATH "${CMAKE_CURRENT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/${_TARGET_NAME}.dir")
 
     add_custom_command(
-        OUTPUT ${CMAKE_GO_OBJ_OUTPUT_PATH}/golang_compiled_${_TARGET_NAME}
-        COMMAND ${Golang_GO_EXECUTABLE} build -w -s -v -x ${_ADD_GO_FLAGS} -o "${_ADD_GO_OUTPUT_DIR}/${_GO_TARGET_OUTPUT_NAME}"
-        
+        OUTPUT "${_ADD_GO_OUTPUT_DIR}/${_GO_TARGET_OUTPUT_NAME}"
+        COMMAND ${Golang_GO_EXECUTABLE} build -v -x ${_ADD_GO_FLAGS} -o "${_ADD_GO_OUTPUT_DIR}/${_GO_TARGET_OUTPUT_NAME}"
+        DEPENDS ${_GO_PACKAGE_FILES} ${_GO_PACKAGE_DEPS_FILES}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Building Golang objects for ${_TARGET_NAME}"
+    )
+
+    add_custom_target(${_TARGET_NAME} ALL DEPENDS "${_ADD_GO_OUTPUT_DIR}/${_GO_TARGET_OUTPUT_NAME}")
+
+    set_property(
+        TARGET
+            ${_TARGET_NAME}
+        PROPERTY
+            INSTALL_FILES
+                "${_ADD_GO_OUTPUT_DIR}/${_GO_TARGET_OUTPUT_NAME}"
     )
 endfunction()
